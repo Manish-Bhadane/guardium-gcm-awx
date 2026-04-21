@@ -44,41 +44,49 @@
           - server_password | length > 0
         fail_msg: "Required survey fields missing: server_ip, server_user, server_password"
 
+    - name: Check if installation directory exists
+      stat:
+        path: "{{ gcm_install_dir }}"
+      register: install_dir_stat
+
+    - name: Fail if installation directory doesn't exist
+      fail:
+        msg: "Installation directory {{ gcm_install_dir }} does not exist"
+      when: not install_dir_stat.stat.exists
+
     - name: Auto-detect K3s installer file
-      find:
-        paths: "{{ gcm_install_dir }}"
-        patterns: "*.sh,k3s*"
-        file_type: file
-        follow: yes
-      register: k3s_files
+      shell: |
+        cd {{ gcm_install_dir }}
+        ls -1 *.sh k3s* 2>/dev/null | head -1 || true
+      register: k3s_detect
+      changed_when: false
 
     - name: Set K3s installer filename
       set_fact:
-        k3s_installer: "{{ k3s_files.files[0].path | basename }}"
-      when: k3s_files.matched > 0
+        k3s_installer: "{{ k3s_detect.stdout | trim }}"
+      when: k3s_detect.stdout | trim | length > 0
 
     - name: Fail if no K3s installer found
       fail:
         msg: "No K3s installer script found in {{ gcm_install_dir }}. Expected .sh file or k3s* file."
-      when: k3s_files.matched == 0
+      when: k3s_detect.stdout | trim | length == 0
 
     - name: Auto-detect GCM package file
-      find:
-        paths: "{{ gcm_install_dir }}"
-        patterns: "*.tgz,*.tar.gz,IBMGuardium*"
-        file_type: file
-        follow: yes
-      register: gcm_files
+      shell: |
+        cd {{ gcm_install_dir }}
+        ls -1 *.tgz *.tar.gz IBMGuardium* 2>/dev/null | head -1 || true
+      register: gcm_detect
+      changed_when: false
 
     - name: Set GCM package filename
       set_fact:
-        gcm_package: "{{ gcm_files.files[0].path | basename }}"
-      when: gcm_files.matched > 0
+        gcm_package: "{{ gcm_detect.stdout | trim }}"
+      when: gcm_detect.stdout | trim | length > 0
 
     - name: Fail if no GCM package found
       fail:
         msg: "No GCM package found in {{ gcm_install_dir }}. Expected .tgz or .tar.gz file."
-      when: gcm_files.matched == 0
+      when: gcm_detect.stdout | trim | length == 0
 
     - name: Display installation parameters
       debug:
