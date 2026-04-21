@@ -44,6 +44,20 @@
           - server_password | length > 0
         fail_msg: "Required survey fields missing: server_ip, server_user, server_password"
 
+    - name: Debug - Check current user and directory
+      shell: |
+        echo "Current user: $(whoami)"
+        echo "Current directory: $(pwd)"
+        echo "Checking path: {{ gcm_install_dir }}"
+        ls -la /tmp/GCM_installation/ 2>&1 || echo "Cannot access /tmp/GCM_installation/"
+        ls -la {{ gcm_install_dir }} 2>&1 || echo "Cannot access {{ gcm_install_dir }}"
+      register: debug_info
+      changed_when: false
+
+    - name: Display debug information
+      debug:
+        var: debug_info.stdout_lines
+
     - name: Auto-detect K3s installer file
       shell: |
         if [ -d "{{ gcm_install_dir }}" ]; then
