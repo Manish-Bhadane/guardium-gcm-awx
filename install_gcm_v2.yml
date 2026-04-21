@@ -223,10 +223,16 @@
     # ========================================
     - name: "STEP 4: Verify Kubernetes Installation"
       block:
+        - name: Set KUBECONFIG environment variable
+          set_fact:
+            kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+
         - name: Check kubectl availability
           command: kubectl version --client
           register: kubectl_version
           changed_when: false
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
 
         - name: Get Kubernetes nodes status
           command: kubectl get nodes
@@ -235,6 +241,8 @@
           retries: 5
           delay: 10
           until: k8s_nodes.rc == 0
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
 
         - name: Display Kubernetes nodes status
           debug:
@@ -382,6 +390,8 @@
           shell: kubectl get pods -n gcm 2>/dev/null | grep -c gcm || echo "0"
           register: gcm_pods_check
           changed_when: false
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
           failed_when: false
 
         - name: Run GCM installation
@@ -430,12 +440,16 @@
           register: pods_ready
           changed_when: false
           failed_when: false
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
 
         - name: Get GCM pods status
           command: kubectl get pods -n gcm
           register: gcm_pods_status
           changed_when: false
           failed_when: false
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
 
         - name: Display GCM pods status
           debug:
@@ -446,6 +460,8 @@
           register: gcm_services
           changed_when: false
           failed_when: false
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
 
         - name: Display GCM services
           debug:
