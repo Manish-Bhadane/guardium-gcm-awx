@@ -406,10 +406,9 @@
             cd {{ gcm_install_dir }}/helm-charts
             # Find all YAML files with imagePullSecrets and comment out those lines
             find charts/*/templates/*.yaml -type f -exec grep -l "imagePullSecrets" {} \; | while read file; do
-              # Comment out lines containing imagePullSecrets or .Values.global.imagePullSecrets
               sed -i '/imagePullSecrets:/s/^/#/' "$file"
               sed -i '/\.Values\.global\.imagePullSecrets/s/^/#/' "$file"
-              sed -i '/{{- range.*imagePullSecrets/s/^/#/' "$file"
+              sed -i '/range.*imagePullSecrets/s/^/#/' "$file"
             done
           when: gcm_pods_check.stdout | int == 0
 
