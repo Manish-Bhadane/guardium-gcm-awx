@@ -401,11 +401,16 @@
             KUBECONFIG: "{{ kubeconfig_path }}"
           failed_when: false
 
-        - name: Patch gcm-certs template to remove imagePullSecrets
+        - name: Patch all chart templates to remove imagePullSecrets references
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
-            # Comment out imagePullSecrets lines in job-certgen.yaml (lines 13-14)
-            sed -i '13,14s/^/#/' charts/gcm-certs/templates/job-certgen.yaml
+            # Find all YAML files with imagePullSecrets and comment out those lines
+            find charts/*/templates/*.yaml -type f -exec grep -l "imagePullSecrets" {} \; | while read file; do
+              # Comment out lines containing imagePullSecrets or .Values.global.imagePullSecrets
+              sed -i '/imagePullSecrets:/s/^/#/' "$file"
+              sed -i '/\.Values\.global\.imagePullSecrets/s/^/#/' "$file"
+              sed -i '/{{- range.*imagePullSecrets/s/^/#/' "$file"
+            done
           when: gcm_pods_check.stdout | int == 0
 
         - name: Patch installer.sh to skip license and password prompts
