@@ -24,8 +24,6 @@
   become_method: su
   vars:
     gcm_install_dir: "/tmp/GCM_installation/installer"
-    k3s_installer: "{{ k3s_installer | default('k3s.sh') }}"
-    gcm_package: "{{ gcm_package | default('IBMGuardiumCryptographyManager-2.0.0.1.tgz') }}"
     gcm_platform: "{{ gcm_platform | default('k8s') }}"
     gcm_app_port: "{{ gcm_app_port | default('31443') }}"
     gcm_oids_port: "{{ gcm_oids_port | default('30443') }}"
@@ -46,6 +44,40 @@
           - server_password | length > 0
         fail_msg: "Required survey fields missing: server_ip, server_user, server_password"
 
+    - name: Auto-detect K3s installer file
+      find:
+        paths: "{{ gcm_install_dir }}"
+        patterns: "*.sh,k3s*"
+        file_type: file
+      register: k3s_files
+
+    - name: Set K3s installer filename
+      set_fact:
+        k3s_installer: "{{ k3s_files.files[0].path | basename }}"
+      when: k3s_files.matched > 0
+
+    - name: Fail if no K3s installer found
+      fail:
+        msg: "No K3s installer script found in {{ gcm_install_dir }}. Expected .sh file or k3s* file."
+      when: k3s_files.matched == 0
+
+    - name: Auto-detect GCM package file
+      find:
+        paths: "{{ gcm_install_dir }}"
+        patterns: "*.tgz,*.tar.gz,IBMGuardium*"
+        file_type: file
+      register: gcm_files
+
+    - name: Set GCM package filename
+      set_fact:
+        gcm_package: "{{ gcm_files.files[0].path | basename }}"
+      when: gcm_files.matched > 0
+
+    - name: Fail if no GCM package found
+      fail:
+        msg: "No GCM package found in {{ gcm_install_dir }}. Expected .tgz or .tar.gz file."
+      when: gcm_files.matched == 0
+
     - name: Display installation parameters
       debug:
         msg: |
@@ -54,8 +86,8 @@
           Target Server: {{ ansible_host }}
           OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
           Install Directory: {{ gcm_install_dir }}
-          K3s Installer: {{ k3s_installer }}
-          GCM Package: {{ gcm_package }}
+          K3s Installer: {{ k3s_installer }} (auto-detected)
+          GCM Package: {{ gcm_package }} (auto-detected)
           Platform: {{ gcm_platform }}
           App Port: {{ gcm_app_port }}
           OIDS Port: {{ gcm_oids_port }}
