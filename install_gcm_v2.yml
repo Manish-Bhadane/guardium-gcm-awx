@@ -2,6 +2,7 @@
 - name: Copy Files from AWX Server to Target Server
   hosts: localhost
   gather_facts: no
+  become: no
   vars:
     awx_files_dir: "/tmp/GCM_installation/installer"
     target_dir: "/tmp/GCM_installation/installer"
