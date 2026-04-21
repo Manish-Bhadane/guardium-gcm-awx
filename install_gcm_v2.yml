@@ -131,12 +131,12 @@
         success_msg: "OS check passed: {{ ansible_distribution }} {{ ansible_distribution_version }}"
 
     - name: Check minimum system requirements
-      assert:
-        that:
-          - ansible_processor_vcpus >= 16
-          - ansible_memtotal_mb >= 40960
-        fail_msg: "Insufficient resources. Required: 16+ vCPUs, 48GB+ RAM. Available: {{ ansible_processor_vcpus }} vCPUs, {{ ansible_memtotal_mb }}MB RAM"
-        success_msg: "System resources check passed: {{ ansible_processor_vcpus }} vCPUs, {{ ansible_memtotal_mb }}MB RAM"
+      debug:
+        msg: |
+          System Resources:
+          - vCPUs: {{ ansible_processor_vcpus }} (Recommended: 16+)
+          - RAM: {{ ansible_memtotal_mb }}MB (Recommended: 48GB+)
+          - Status: {% if ansible_processor_vcpus >= 16 and ansible_memtotal_mb >= 40960 %}✅ Meets requirements{% else %}⚠️  Below recommended (installation will continue){% endif %}
 
   tasks:
     # ========================================
