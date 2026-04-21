@@ -348,12 +348,20 @@
         - name: Update global-values.yaml using yq
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
+            # Set platform to k8s
             yq eval '.platform = "{{ gcm_platform }}"' -i global-values.yaml
+            # Set FQDN hostname
             yq eval '.name = "{{ system_hostname.stdout }}"' -i global-values.yaml
+            # Set app host with IP:port
             yq eval '.app.host = "{{ system_ip }}:{{ gcm_app_port }}"' -i global-values.yaml
+            # Set OIDS server host with IP:port
             yq eval '.oidsServer.host = "{{ system_ip }}:{{ gcm_oids_port }}"' -i global-values.yaml
+            # Disable storage class for app (set to false)
             yq eval '.persistence.app.storageClassEnabled = false' -i global-values.yaml
+            # Disable storage class for dbs (set to false)
             yq eval '.persistence.dbs.storageClassEnabled = false' -i global-values.yaml
+            # Remove imagePullSecrets to avoid nil pointer error
+            yq eval 'del(.global.imagePullSecrets)' -i global-values.yaml
           register: yq_update
 
         - name: Display modified global-values.yaml (first 100 lines)
