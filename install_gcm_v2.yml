@@ -2,6 +2,7 @@
 - name: Prepare Installation Files on AWX Server
   hosts: localhost
   gather_facts: no
+  become: no
   vars:
     awx_files_dir: "/tmp/GCM_installation/installer"
   tasks:
