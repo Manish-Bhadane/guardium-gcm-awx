@@ -396,12 +396,10 @@
         - name: Patch installer.sh to skip license prompt
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
-            # Insert response="yes" before line 118
-            sed -i '117 a response="yes"' installer.sh
-            # Comment out the read from /dev/tty (lines 118-120)
-            sed -i '118,122s/^read /#read /' installer.sh
-            # Set LICENSE_ACCEPTED after the commented read
-            sed -i '123 i LICENSE_ACCEPTED="yes"' installer.sh
+            # Replace all /dev/tty with /dev/null
+            sed -i 's|/dev/tty|/dev/null|g' installer.sh
+            # Set response and LICENSE_ACCEPTED variables at the beginning
+            sed -i '1 a response="yes"\nLICENSE_ACCEPTED="yes"' installer.sh
           when: gcm_pods_check.stdout | int == 0
 
         - name: Run GCM installation
