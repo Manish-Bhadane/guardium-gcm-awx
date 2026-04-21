@@ -1,8 +1,61 @@
 ---
-- name: Setup Dynamic Target Host for GCM Installation
+- name: Prepare Installation Files on AWX Server
   hosts: localhost
   gather_facts: no
+  vars:
+    awx_files_dir: "/tmp/GCM_installation/installer"
   tasks:
+    - name: Validate required user inputs
+      assert:
+        that:
+          - server_ip is defined
+          - server_ip | trim | length > 0
+          - server_user is defined
+          - server_user | length > 0
+          - server_password is defined
+          - server_password | length > 0
+        fail_msg: "Required survey fields missing: server_ip, server_user, server_password"
+
+    - name: Auto-detect K3s installer file on AWX server
+      shell: |
+        cd {{ awx_files_dir }}
+        ls -1 *.sh k3s* 2>/dev/null | head -1 || echo ""
+      register: k3s_detect
+      changed_when: false
+
+    - name: Fail if no K3s installer found on AWX server
+      fail:
+        msg: "No K3s installer script found in {{ awx_files_dir }} on AWX server"
+      when: k3s_detect.stdout | trim | length == 0
+
+    - name: Set K3s installer filename
+      set_fact:
+        k3s_installer: "{{ k3s_detect.stdout | trim }}"
+
+    - name: Auto-detect GCM package file on AWX server
+      shell: |
+        cd {{ awx_files_dir }}
+        ls -1 *.tgz *.tar.gz IBMGuardium* 2>/dev/null | head -1 || echo ""
+      register: gcm_detect
+      changed_when: false
+
+    - name: Fail if no GCM package found on AWX server
+      fail:
+        msg: "No GCM package found in {{ awx_files_dir }} on AWX server"
+      when: gcm_detect.stdout | trim | length == 0
+
+    - name: Set GCM package filename
+      set_fact:
+        gcm_package: "{{ gcm_detect.stdout | trim }}"
+
+    - name: Display detected files
+      debug:
+        msg: |
+          Files detected on AWX server ({{ awx_files_dir }}):
+          - K3s Installer: {{ k3s_installer }}
+          - GCM Package: {{ gcm_package }}
+          These will be copied to target server: {{ server_ip }}
+
     - name: Add target server dynamically
       add_host:
         name: dynamic_gcm_target
@@ -16,6 +69,9 @@
         ansible_shell_type: sh
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
         ansible_ssh_extra_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        k3s_installer: "{{ k3s_installer }}"
+        gcm_package: "{{ gcm_package }}"
+        awx_files_dir: "{{ awx_files_dir }}"
 
 - name: Install IBM Guardium Cryptographic Manager (GCM)
   hosts: dynamic_targets
@@ -33,77 +89,35 @@
     gcm_oids_password: "{{ gcm_oids_password | default('gcmsecret') }}"
 
   pre_tasks:
-    - name: Validate required user inputs
-      assert:
-        that:
-          - server_ip is defined
-          - server_ip | trim | length > 0
-          - server_user is defined
-          - server_user | length > 0
-          - server_password is defined
-          - server_password | length > 0
-        fail_msg: "Required survey fields missing: server_ip, server_user, server_password"
+    - name: Create installation directory on target server
+      file:
+        path: "{{ gcm_install_dir }}"
+        state: directory
+        mode: '0755'
 
-    - name: Debug - Check current user and directory
+    - name: Copy K3s installer from AWX server to target server
+      copy:
+        src: "{{ awx_files_dir }}/{{ k3s_installer }}"
+        dest: "{{ gcm_install_dir }}/{{ k3s_installer }}"
+        mode: '0755'
+
+    - name: Copy GCM package from AWX server to target server
+      copy:
+        src: "{{ awx_files_dir }}/{{ gcm_package }}"
+        dest: "{{ gcm_install_dir }}/{{ gcm_package }}"
+        mode: '0644'
+
+    - name: Verify files copied successfully
       shell: |
-        echo "Current user: $(whoami)"
-        echo "Current directory: $(pwd)"
-        echo "Checking path: {{ gcm_install_dir }}"
-        ls -la /tmp/GCM_installation/ 2>&1 || echo "Cannot access /tmp/GCM_installation/"
-        ls -la {{ gcm_install_dir }} 2>&1 || echo "Cannot access {{ gcm_install_dir }}"
-      register: debug_info
+        echo "Files on target server:"
+        ls -lh {{ gcm_install_dir }}/
+      register: files_check
       changed_when: false
 
-    - name: Display debug information
+    - name: Display copied files
       debug:
-        var: debug_info.stdout_lines
+        var: files_check.stdout_lines
 
-    - name: Auto-detect K3s installer file
-      shell: |
-        if [ -d "{{ gcm_install_dir }}" ]; then
-          cd {{ gcm_install_dir }}
-          ls -1 *.sh k3s* 2>/dev/null | head -1 || echo ""
-        else
-          echo "DIRECTORY_NOT_FOUND"
-        fi
-      register: k3s_detect
-      changed_when: false
-
-    - name: Fail if installation directory doesn't exist
-      fail:
-        msg: "Installation directory {{ gcm_install_dir }} does not exist"
-      when: k3s_detect.stdout | trim == "DIRECTORY_NOT_FOUND"
-
-    - name: Set K3s installer filename
-      set_fact:
-        k3s_installer: "{{ k3s_detect.stdout | trim }}"
-      when:
-        - k3s_detect.stdout | trim != "DIRECTORY_NOT_FOUND"
-        - k3s_detect.stdout | trim | length > 0
-
-    - name: Fail if no K3s installer found
-      fail:
-        msg: "No K3s installer script found in {{ gcm_install_dir }}. Expected .sh file or k3s* file."
-      when:
-        - k3s_detect.stdout | trim != "DIRECTORY_NOT_FOUND"
-        - k3s_detect.stdout | trim | length == 0
-
-    - name: Auto-detect GCM package file
-      shell: |
-        cd {{ gcm_install_dir }}
-        ls -1 *.tgz *.tar.gz IBMGuardium* 2>/dev/null | head -1 || echo ""
-      register: gcm_detect
-      changed_when: false
-
-    - name: Set GCM package filename
-      set_fact:
-        gcm_package: "{{ gcm_detect.stdout | trim }}"
-      when: gcm_detect.stdout | trim | length > 0
-
-    - name: Fail if no GCM package found
-      fail:
-        msg: "No GCM package found in {{ gcm_install_dir }}. Expected .tgz or .tar.gz file."
-      when: gcm_detect.stdout | trim | length == 0
 
     - name: Display installation parameters
       debug:
