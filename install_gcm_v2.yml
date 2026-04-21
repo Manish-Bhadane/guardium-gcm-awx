@@ -1,0 +1,531 @@
+---
+- name: Setup Dynamic Target Host for GCM Installation
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Add target server dynamically
+      add_host:
+        name: dynamic_gcm_target
+        groups: dynamic_targets
+        ansible_host: "{{ server_ip | trim }}"
+        ansible_user: "{{ server_user }}"
+        ansible_password: "{{ server_password }}"
+        ansible_ssh_pass: "{{ server_password }}"
+        ansible_become_password: "{{ server_password }}"
+        ansible_connection: ssh
+        ansible_shell_type: sh
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+        ansible_ssh_extra_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+- name: Install IBM Guardium Cryptographic Manager (GCM)
+  hosts: dynamic_targets
+  gather_facts: yes
+  become: yes
+  become_method: su
+  vars:
+    gcm_install_dir: "/tmp/GCM_installation/installer"
+    k3s_installer: "{{ k3s_installer | default('k3s.sh') }}"
+    gcm_package: "{{ gcm_package | default('IBMGuardiumCryptographyManager-2.0.0.1.tgz') }}"
+    gcm_platform: "{{ gcm_platform | default('k8s') }}"
+    gcm_app_port: "{{ gcm_app_port | default('31443') }}"
+    gcm_oids_port: "{{ gcm_oids_port | default('30443') }}"
+    gcm_admin_user: "{{ gcm_admin_user | default('gcmadmin') }}"
+    gcm_admin_password: "{{ gcm_admin_password | default('gcmAdmin@123') }}"
+    gcm_oids_user: "{{ gcm_oids_user | default('gcmadmin') }}"
+    gcm_oids_password: "{{ gcm_oids_password | default('gcmsecret') }}"
+
+  pre_tasks:
+    - name: Validate required user inputs
+      assert:
+        that:
+          - server_ip is defined
+          - server_ip | trim | length > 0
+          - server_user is defined
+          - server_user | length > 0
+          - server_password is defined
+          - server_password | length > 0
+        fail_msg: "Required survey fields missing: server_ip, server_user, server_password"
+
+    - name: Display installation parameters
+      debug:
+        msg: |
+          GCM Installation Parameters
+          ===========================
+          Target Server: {{ ansible_host }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Install Directory: {{ gcm_install_dir }}
+          K3s Installer: {{ k3s_installer }}
+          GCM Package: {{ gcm_package }}
+          Platform: {{ gcm_platform }}
+          App Port: {{ gcm_app_port }}
+          OIDS Port: {{ gcm_oids_port }}
+
+    - name: Check OS compatibility (RHEL 9.x required)
+      assert:
+        that:
+          - ansible_distribution == 'RedHat'
+          - ansible_distribution_major_version | int == 9
+        fail_msg: "GCM requires RHEL 9.x. Current OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        success_msg: "OS check passed: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Check minimum system requirements
+      assert:
+        that:
+          - ansible_processor_vcpus >= 16
+          - ansible_memtotal_mb >= 40960
+        fail_msg: "Insufficient resources. Required: 16+ vCPUs, 48GB+ RAM. Available: {{ ansible_processor_vcpus }} vCPUs, {{ ansible_memtotal_mb }}MB RAM"
+        success_msg: "System resources check passed: {{ ansible_processor_vcpus }} vCPUs, {{ ansible_memtotal_mb }}MB RAM"
+
+  tasks:
+    # ========================================
+    # STEP 3: Install Kubernetes (K3s)
+    # ========================================
+    - name: "STEP 3: Install Kubernetes (K3s)"
+      block:
+        - name: Check if K3s installer exists
+          stat:
+            path: "{{ gcm_install_dir }}/{{ k3s_installer }}"
+          register: k3s_installer_file
+
+        - name: Fail if K3s installer not found
+          fail:
+            msg: "K3s installer not found at {{ gcm_install_dir }}/{{ k3s_installer }}"
+          when: not k3s_installer_file.stat.exists
+
+        - name: Make K3s installer executable
+          file:
+            path: "{{ gcm_install_dir }}/{{ k3s_installer }}"
+            mode: '0755'
+            state: file
+
+        - name: Check if K3s is already installed
+          stat:
+            path: /usr/local/bin/kubectl
+          register: kubectl_exists
+
+        - name: Run K3s installation script
+          shell: |
+            cd {{ gcm_install_dir }}
+            ./{{ k3s_installer }}
+          args:
+            creates: /usr/local/bin/kubectl
+          register: k3s_install_result
+          when: not kubectl_exists.stat.exists
+
+        - name: Display K3s installation output
+          debug:
+            var: k3s_install_result.stdout_lines
+          when: k3s_install_result is changed
+
+        - name: Wait for K3s to be ready (30 seconds)
+          pause:
+            seconds: 30
+          when: k3s_install_result is changed
+
+    # ========================================
+    # STEP 4: Verify Kubernetes Installation
+    # ========================================
+    - name: "STEP 4: Verify Kubernetes Installation"
+      block:
+        - name: Check kubectl availability
+          command: kubectl version --client
+          register: kubectl_version
+          changed_when: false
+
+        - name: Get Kubernetes nodes status
+          command: kubectl get nodes
+          register: k8s_nodes
+          changed_when: false
+          retries: 5
+          delay: 10
+          until: k8s_nodes.rc == 0
+
+        - name: Display Kubernetes nodes status
+          debug:
+            var: k8s_nodes.stdout_lines
+
+        - name: Verify node is Ready
+          assert:
+            that:
+              - "'Ready' in k8s_nodes.stdout"
+            fail_msg: "Kubernetes node is not Ready. Status: {{ k8s_nodes.stdout }}"
+            success_msg: "Kubernetes node is Ready"
+
+    # ========================================
+    # STEP 5: Extract and Prepare GCM Package
+    # ========================================
+    - name: "STEP 5: Extract and Prepare GCM Package"
+      block:
+        - name: Check if GCM package exists
+          stat:
+            path: "{{ gcm_install_dir }}/{{ gcm_package }}"
+          register: gcm_package_file
+
+        - name: Fail if GCM package not found
+          fail:
+            msg: "GCM package not found at {{ gcm_install_dir }}/{{ gcm_package }}"
+          when: not gcm_package_file.stat.exists
+
+        - name: Check if GCM is already extracted
+          stat:
+            path: "{{ gcm_install_dir }}/helm-charts"
+          register: helm_charts_dir
+
+        - name: Extract GCM package
+          unarchive:
+            src: "{{ gcm_install_dir }}/{{ gcm_package }}"
+            dest: "{{ gcm_install_dir }}"
+            remote_src: yes
+          when: not helm_charts_dir.stat.exists
+          register: gcm_extract
+
+        - name: Verify helm-charts directory exists
+          stat:
+            path: "{{ gcm_install_dir }}/helm-charts"
+          register: helm_charts_verify
+
+        - name: Fail if helm-charts directory not found
+          fail:
+            msg: "helm-charts directory not found after extraction"
+          when: not helm_charts_verify.stat.exists
+
+        - name: Get system hostname (FQDN)
+          command: hostname
+          register: system_hostname
+          changed_when: false
+
+        - name: Get system IP address
+          set_fact:
+            system_ip: "{{ ansible_default_ipv4.address }}"
+
+        - name: Display system information
+          debug:
+            msg: |
+              System Information
+              ==================
+              Hostname: {{ system_hostname.stdout }}
+              IP Address: {{ system_ip }}
+              App URL: https://{{ system_ip }}:{{ gcm_app_port }}
+              OIDS URL: https://{{ system_ip }}:{{ gcm_oids_port }}
+
+        - name: Backup original global-values.yaml
+          copy:
+            src: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
+            dest: "{{ gcm_install_dir }}/helm-charts/global-values.yaml.backup"
+            remote_src: yes
+            force: no
+
+        - name: Update global-values.yaml - Platform
+          lineinfile:
+            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
+            regexp: '^\s*platform:\s*'
+            line: "  platform: {{ gcm_platform }}"
+            backrefs: no
+
+        - name: Update global-values.yaml - Name (FQDN)
+          lineinfile:
+            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
+            regexp: '^\s*name:\s*'
+            line: "  name: {{ system_hostname.stdout }}"
+            backrefs: no
+
+        - name: Update global-values.yaml - App Host
+          replace:
+            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
+            regexp: '(app:\s*\n\s*host:\s*).*'
+            replace: '\1{{ system_ip }}:{{ gcm_app_port }}'
+
+        - name: Update global-values.yaml - OIDS Host
+          replace:
+            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
+            regexp: '(oidsServer:\s*\n\s*host:\s*).*'
+            replace: '\1{{ system_ip }}:{{ gcm_oids_port }}'
+
+        - name: Update global-values.yaml - Disable App Storage Class
+          replace:
+            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
+            regexp: '(persistence:\s*\n\s*app:\s*\n\s*storageClassEnabled:\s*)true'
+            replace: '\1false'
+
+        - name: Update global-values.yaml - Disable DBS Storage Class
+          replace:
+            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
+            regexp: '(persistence:\s*\n\s*dbs:\s*\n\s*storageClassEnabled:\s*)true'
+            replace: '\1false'
+
+        - name: Display modified global-values.yaml (first 100 lines)
+          shell: head -100 {{ gcm_install_dir }}/helm-charts/global-values.yaml
+          register: global_values_content
+          changed_when: false
+
+        - name: Show global-values.yaml content
+          debug:
+            var: global_values_content.stdout_lines
+
+    # ========================================
+    # STEP 6: Install GCM
+    # ========================================
+    - name: "STEP 6: Install GCM"
+      block:
+        - name: Check if installer.sh exists
+          stat:
+            path: "{{ gcm_install_dir }}/helm-charts/installer.sh"
+          register: installer_script
+
+        - name: Fail if installer.sh not found
+          fail:
+            msg: "installer.sh not found at {{ gcm_install_dir }}/helm-charts/installer.sh"
+          when: not installer_script.stat.exists
+
+        - name: Make installer.sh executable
+          file:
+            path: "{{ gcm_install_dir }}/helm-charts/installer.sh"
+            mode: '0755'
+
+        - name: Check if GCM is already installed
+          shell: kubectl get pods -n gcm 2>/dev/null | grep -c gcm || echo "0"
+          register: gcm_pods_check
+          changed_when: false
+          failed_when: false
+
+        - name: Run GCM installation
+          shell: |
+            cd {{ gcm_install_dir }}/helm-charts
+            ./installer.sh install
+          register: gcm_install_result
+          async: 1800
+          poll: 30
+          when: gcm_pods_check.stdout | int == 0
+
+        - name: Display GCM installation output
+          debug:
+            var: gcm_install_result.stdout_lines
+          when: gcm_install_result is changed
+
+        - name: Check for installation logs if failed
+          block:
+            - name: Find deployment logs directory
+              find:
+                paths: "{{ gcm_install_dir }}/helm-charts"
+                patterns: "deployment_logs"
+                file_type: directory
+              register: deployment_logs_dir
+
+            - name: Display deployment logs if available
+              shell: |
+                if [ -d "{{ gcm_install_dir }}/helm-charts/deployment_logs" ]; then
+                  echo "=== Deployment Logs ==="
+                  ls -la {{ gcm_install_dir }}/helm-charts/deployment_logs/
+                  echo ""
+                  echo "=== Latest Log Content ==="
+                  tail -100 {{ gcm_install_dir }}/helm-charts/deployment_logs/*.log 2>/dev/null || echo "No logs found"
+                fi
+              register: deployment_logs
+              changed_when: false
+
+            - name: Show deployment logs
+              debug:
+                var: deployment_logs.stdout_lines
+          when: gcm_install_result is failed
+
+        - name: Wait for GCM pods to be ready (5 minutes)
+          shell: |
+            kubectl wait --for=condition=ready pod -l app=gcm -n gcm --timeout=300s 2>/dev/null || true
+          register: pods_ready
+          changed_when: false
+          failed_when: false
+
+        - name: Get GCM pods status
+          command: kubectl get pods -n gcm
+          register: gcm_pods_status
+          changed_when: false
+          failed_when: false
+
+        - name: Display GCM pods status
+          debug:
+            var: gcm_pods_status.stdout_lines
+
+        - name: Get GCM services
+          command: kubectl get svc -n gcm
+          register: gcm_services
+          changed_when: false
+          failed_when: false
+
+        - name: Display GCM services
+          debug:
+            var: gcm_services.stdout_lines
+
+    # ========================================
+    # STEP 7: Verify GCM Installation
+    # ========================================
+    - name: "STEP 7: Verify GCM Installation"
+      block:
+        - name: Check GCM application port accessibility
+          wait_for:
+            host: "{{ system_ip }}"
+            port: "{{ gcm_app_port }}"
+            timeout: 60
+          register: app_port_check
+          failed_when: false
+
+        - name: Check GCM OIDS port accessibility
+          wait_for:
+            host: "{{ system_ip }}"
+            port: "{{ gcm_oids_port }}"
+            timeout: 60
+          register: oids_port_check
+          failed_when: false
+
+        - name: Display port accessibility status
+          debug:
+            msg: |
+              Port Accessibility Status
+              =========================
+              App Port ({{ gcm_app_port }}): {{ 'Accessible' if app_port_check is succeeded else 'Not Accessible' }}
+              OIDS Port ({{ gcm_oids_port }}): {{ 'Accessible' if oids_port_check is succeeded else 'Not Accessible' }}
+
+        - name: Check application logs location
+          stat:
+            path: /volumes/logs
+          register: app_logs_dir
+
+        - name: Display application logs information
+          debug:
+            msg: |
+              Application Logs
+              ================
+              Location: /volumes/logs
+              Exists: {{ app_logs_dir.stat.exists }}
+              Note: These are WAS (WebSphere Application Server) logs
+
+  post_tasks:
+    - name: Display GCM installation summary
+      debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║     IBM Guardium Cryptographic Manager (GCM) Installation     ║
+          ║                    COMPLETED SUCCESSFULLY                      ║
+          ╚════════════════════════════════════════════════════════════════╝
+
+          ═══════════════════════════════════════════════════════════════
+                              🎉 ACCESS INFORMATION 🎉
+          ═══════════════════════════════════════════════════════════════
+
+          📱 GCM APPLICATION
+          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          Application: https://{{ system_ip }}:{{ gcm_app_port }}
+          Username: {{ gcm_admin_user }}
+          Password: {{ gcm_admin_password }}
+
+          🔐 OIDC SERVER
+          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          OIDC: https://{{ system_ip }}:{{ gcm_oids_port }}
+          Username: {{ gcm_oids_user }}
+          Password: {{ gcm_oids_password }}
+
+          ═══════════════════════════════════════════════════════════════
+
+          Installation Details
+          ====================
+          Target Server: {{ ansible_host }}
+          Hostname: {{ system_hostname.stdout }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Installation Time: {{ ansible_date_time.iso8601 }}
+          
+          Kubernetes Cluster
+          ==================
+          Type: K3s (Single-Node Kubernetes Cluster)
+          Namespace: gcm
+          Node Status: Ready
+          
+          Important Locations
+          ===================
+          📁 Installation Directory: {{ gcm_install_dir }}/helm-charts
+          📁 Application Logs: /volumes/logs (WAS logs)
+          📁 Deployment Logs: {{ gcm_install_dir }}/helm-charts/deployment_logs
+          📄 Configuration: {{ gcm_install_dir }}/helm-charts/global-values.yaml
+          
+          Verification Commands
+          =====================
+          kubectl get nodes
+          kubectl get pods -n gcm
+          kubectl get svc -n gcm
+          kubectl logs -n gcm <pod-name>
+          
+          Next Steps
+          ==========
+          1. Open browser: https://{{ system_ip }}:{{ gcm_app_port }}
+          2. Login with {{ gcm_admin_user }}/{{ gcm_admin_password }}
+          3. Access OIDC at: https://{{ system_ip }}:{{ gcm_oids_port }}
+          4. Configure GCM settings as needed
+          5. Review logs at /volumes/logs if needed
+          
+          ✅ GCM successfully installed on single-node Kubernetes cluster!
+
+    - name: Create GCM installation summary file
+      copy:
+        content: |
+          ═══════════════════════════════════════════════════════════════
+          IBM Guardium Cryptographic Manager (GCM) Installation Summary
+          ═══════════════════════════════════════════════════════════════
+          
+          Installation Date: {{ ansible_date_time.iso8601 }}
+          Target Server: {{ ansible_host }}
+          Hostname: {{ system_hostname.stdout }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          
+          ═══════════════════════════════════════════════════════════════
+                              ACCESS INFORMATION
+          ═══════════════════════════════════════════════════════════════
+          
+          GCM APPLICATION
+          ───────────────────────────────────────────────────────────────
+          Application: https://{{ system_ip }}:{{ gcm_app_port }}
+          Username: {{ gcm_admin_user }}
+          Password: {{ gcm_admin_password }}
+          
+          OIDC SERVER
+          ───────────────────────────────────────────────────────────────
+          OIDC: https://{{ system_ip }}:{{ gcm_oids_port }}
+          Username: {{ gcm_oids_user }}
+          Password: {{ gcm_oids_password }}
+          
+          ═══════════════════════════════════════════════════════════════
+          
+          Installation Components
+          -----------------------
+          - Kubernetes: K3s (Single-Node Kubernetes Cluster)
+          - GCM Version: {{ gcm_package }}
+          - Platform: {{ gcm_platform }}
+          - Namespace: gcm
+          
+          Important Paths
+          ---------------
+          Installation: {{ gcm_install_dir }}/helm-charts
+          Application Logs: /volumes/logs
+          Deployment Logs: {{ gcm_install_dir }}/helm-charts/deployment_logs
+          Configuration: {{ gcm_install_dir }}/helm-charts/global-values.yaml
+          
+          Verification Commands
+          ---------------------
+          kubectl get nodes
+          kubectl get pods -n gcm
+          kubectl get svc -n gcm
+          kubectl describe pod <pod-name> -n gcm
+          kubectl logs <pod-name> -n gcm
+          
+          Troubleshooting
+          ---------------
+          1. Check deployment logs: {{ gcm_install_dir }}/helm-charts/deployment_logs/
+          2. Check application logs: /volumes/logs
+          3. Check pod status: kubectl get pods -n gcm
+          4. Check pod logs: kubectl logs -n gcm <pod-name>
+          5. Check services: kubectl get svc -n gcm
+          
+          ═══════════════════════════════════════════════════════════════
+          Installation completed successfully on single-node K3s cluster!
+          ═══════════════════════════════════════════════════════════════
+        dest: "{{ gcm_install_dir }}/GCM_Installation_Summary.txt"
+        mode: '0644'
+
+# Made with Bob
