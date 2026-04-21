@@ -176,7 +176,8 @@
             cd {{ gcm_install_dir }}
             export vm_hostname="{{ vm_hostname_result.stdout }}"
             export vm_password="{{ server_password }}"
-            ./{{ k3s_installer }}
+            ./{{ k3s_installer }} 2>&1 | tee /tmp/k3s_install.log
+            exit ${PIPESTATUS[0]}
           args:
             creates: /usr/local/bin/kubectl
           register: k3s_install_result
@@ -184,11 +185,33 @@
           environment:
             vm_hostname: "{{ vm_hostname_result.stdout }}"
             vm_password: "{{ server_password }}"
+          ignore_errors: yes
 
         - name: Display K3s installation output
           debug:
             var: k3s_install_result.stdout_lines
           when: k3s_install_result is changed
+
+        - name: Display K3s installation log if failed
+          shell: cat /tmp/k3s_install.log
+          register: k3s_log
+          when:
+            - k3s_install_result is changed
+            - k3s_install_result.rc != 0
+
+        - name: Show full K3s error log
+          debug:
+            var: k3s_log.stdout_lines
+          when:
+            - k3s_install_result is changed
+            - k3s_install_result.rc != 0
+
+        - name: Fail if K3s installation failed
+          fail:
+            msg: "K3s installation failed. Check the logs above for details."
+          when:
+            - k3s_install_result is changed
+            - k3s_install_result.rc != 0
 
         - name: Wait for K3s to be ready (30 seconds)
           pause:
