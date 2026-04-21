@@ -275,12 +275,17 @@
             path: "{{ gcm_install_dir }}/helm-charts"
           register: helm_charts_dir
 
-        - name: Extract GCM package
+        - name: Remove corrupted helm-charts directory if exists
+          file:
+            path: "{{ gcm_install_dir }}/helm-charts"
+            state: absent
+          when: helm_charts_dir.stat.exists
+
+        - name: Extract GCM package (fresh copy)
           unarchive:
             src: "{{ gcm_install_dir }}/{{ gcm_package }}"
             dest: "{{ gcm_install_dir }}"
             remote_src: yes
-          when: not helm_charts_dir.stat.exists
           register: gcm_extract
 
         - name: Verify helm-charts directory exists
