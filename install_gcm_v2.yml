@@ -404,11 +404,11 @@
         - name: Patch all chart templates to remove imagePullSecrets references
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
-            # Find all YAML files with imagePullSecrets and comment out those lines
+            # Find all YAML files with imagePullSecrets and DELETE those lines (not comment)
             find charts/*/templates/*.yaml -type f -exec grep -l "imagePullSecrets" {} \; | while read file; do
-              sed -i '/imagePullSecrets:/s/^/#/' "$file"
-              sed -i '/\.Values\.global\.imagePullSecrets/s/^/#/' "$file"
-              sed -i '/range.*imagePullSecrets/s/^/#/' "$file"
+              sed -i '/imagePullSecrets:/d' "$file"
+              sed -i '/\.Values\.global\.imagePullSecrets/d' "$file"
+              sed -i '/range.*imagePullSecrets/d' "$file"
             done
           when: gcm_pods_check.stdout | int == 0
 
