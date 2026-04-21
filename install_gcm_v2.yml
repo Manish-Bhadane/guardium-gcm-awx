@@ -47,6 +47,7 @@
     - name: Check if installation directory exists
       stat:
         path: "{{ gcm_install_dir }}"
+        follow: yes
       register: install_dir_stat
 
     - name: Fail if installation directory doesn't exist
