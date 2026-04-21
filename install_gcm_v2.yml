@@ -400,14 +400,36 @@
             KUBECONFIG: "{{ kubeconfig_path }}"
           failed_when: false
 
+        - name: Install yq (YAML processor required by GCM installer)
+          shell: |
+            if ! command -v yq &> /dev/null; then
+              wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+              chmod +x /usr/bin/yq
+            fi
+          when: gcm_pods_check.stdout | int == 0
+
+        - name: Verify yq installation
+          command: yq --version
+          register: yq_version
+          changed_when: false
+          when: gcm_pods_check.stdout | int == 0
+
+        - name: Display yq version
+          debug:
+            var: yq_version.stdout
+          when: gcm_pods_check.stdout | int == 0
+
         - name: Run GCM installation
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
+            export KUBECONFIG={{ kubeconfig_path }}
             ./installer.sh install
           register: gcm_install_result
           async: 1800
           poll: 30
           when: gcm_pods_check.stdout | int == 0
+          environment:
+            KUBECONFIG: "{{ kubeconfig_path }}"
 
         - name: Display GCM installation output
           debug:
