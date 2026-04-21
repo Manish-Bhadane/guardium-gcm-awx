@@ -400,8 +400,10 @@
             sed -i 's|/dev/tty|/dev/null|g' installer.sh
             # Set response and LICENSE_ACCEPTED variables at the beginning
             sed -i '1 a response="yes"\nLICENSE_ACCEPTED="yes"' installer.sh
-            # Set default GCM admin password to skip password prompts
-            sed -i '1 a GCM_ADMIN_PASSWORD="gcmAdmin@123"' installer.sh
+            # Set default GCM admin password (both uppercase and lowercase versions)
+            sed -i '1 a GCM_ADMIN_PASSWORD="gcmAdmin@123"\ngcm_admin_password="gcmAdmin@123"' installer.sh
+            # Comment out the password read prompt at line 772
+            sed -i '772s/^read -s/echo "gcmAdmin@123" #read -s/' installer.sh
           when: gcm_pods_check.stdout | int == 0
 
         - name: Run GCM installation
