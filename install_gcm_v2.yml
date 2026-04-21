@@ -165,26 +165,25 @@
             path: /usr/local/bin/kubectl
           register: kubectl_exists
 
-        - name: Fix hostname for K3s installation
-          shell: |
-            # Get the actual hostname
-            HOSTNAME=$(hostname -s)
-            # Update /etc/hosts if needed
-            if ! grep -q "127.0.0.1.*${HOSTNAME}" /etc/hosts; then
-              echo "127.0.0.1 ${HOSTNAME} ${HOSTNAME}.localdomain localhost" >> /etc/hosts
-            fi
+        - name: Get hostname for K3s installation
+          shell: hostname -s
+          register: vm_hostname_result
+          changed_when: false
           when: not kubectl_exists.stat.exists
 
         - name: Run K3s installation script
           shell: |
             cd {{ gcm_install_dir }}
-            INSTALL_K3S_SKIP_DOWNLOAD=true ./{{ k3s_installer }}
+            export vm_hostname="{{ vm_hostname_result.stdout }}"
+            export vm_password="{{ server_password }}"
+            ./{{ k3s_installer }}
           args:
             creates: /usr/local/bin/kubectl
           register: k3s_install_result
           when: not kubectl_exists.stat.exists
           environment:
-            INSTALL_K3S_SKIP_DOWNLOAD: "true"
+            vm_hostname: "{{ vm_hostname_result.stdout }}"
+            vm_password: "{{ server_password }}"
 
         - name: Display K3s installation output
           debug:
