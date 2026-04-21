@@ -333,35 +333,23 @@
             line: "  name: {{ system_hostname.stdout }}"
             backrefs: no
 
-        - name: Update global-values.yaml - App Host
-          lineinfile:
-            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '^\s*host:\s*.*$'
-            line: '    host: {{ system_ip }}:{{ gcm_app_port }}'
-            insertafter: '^app:'
+        - name: Install yq for YAML manipulation
+          shell: |
+            if ! command -v yq &> /dev/null; then
+              wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+              chmod +x /usr/bin/yq
+            fi
 
-        - name: Update global-values.yaml - OIDS Host
-          lineinfile:
-            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '^\s*host:\s*.*$'
-            line: '    host: {{ system_ip }}:{{ gcm_oids_port }}'
-            insertafter: '^oidsServer:'
-
-        - name: Update global-values.yaml - Disable App Storage Class
-          lineinfile:
-            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '^\s*storageClassEnabled:\s*true\s*$'
-            line: '      storageClassEnabled: false'
-            insertafter: '^\s*app:'
-            firstmatch: yes
-
-        - name: Update global-values.yaml - Disable DBS Storage Class
-          lineinfile:
-            path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '^\s*storageClassEnabled:\s*true\s*$'
-            line: '      storageClassEnabled: false'
-            insertafter: '^\s*dbs:'
-            firstmatch: yes
+        - name: Update global-values.yaml using yq
+          shell: |
+            cd {{ gcm_install_dir }}/helm-charts
+            yq eval '.platform = "{{ gcm_platform }}"' -i global-values.yaml
+            yq eval '.name = "{{ system_hostname.stdout }}"' -i global-values.yaml
+            yq eval '.app.host = "{{ system_ip }}:{{ gcm_app_port }}"' -i global-values.yaml
+            yq eval '.oidsServer.host = "{{ system_ip }}:{{ gcm_oids_port }}"' -i global-values.yaml
+            yq eval '.persistence.app.storageClassEnabled = false' -i global-values.yaml
+            yq eval '.persistence.dbs.storageClassEnabled = false' -i global-values.yaml
+          register: yq_update
 
         - name: Display modified global-values.yaml (first 100 lines)
           shell: head -100 {{ gcm_install_dir }}/helm-charts/global-values.yaml
@@ -399,25 +387,6 @@
           environment:
             KUBECONFIG: "{{ kubeconfig_path }}"
           failed_when: false
-
-        - name: Install yq (YAML processor required by GCM installer)
-          shell: |
-            if ! command -v yq &> /dev/null; then
-              wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-              chmod +x /usr/bin/yq
-            fi
-          when: gcm_pods_check.stdout | int == 0
-
-        - name: Verify yq installation
-          command: yq --version
-          register: yq_version
-          changed_when: false
-          when: gcm_pods_check.stdout | int == 0
-
-        - name: Display yq version
-          debug:
-            var: yq_version.stdout
-          when: gcm_pods_check.stdout | int == 0
 
         - name: Run GCM installation
           shell: |
