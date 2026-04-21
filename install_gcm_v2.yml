@@ -393,13 +393,15 @@
             KUBECONFIG: "{{ kubeconfig_path }}"
           failed_when: false
 
-        - name: Patch installer.sh to skip license prompt
+        - name: Patch installer.sh to skip license and password prompts
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
             # Replace all /dev/tty with /dev/null
             sed -i 's|/dev/tty|/dev/null|g' installer.sh
             # Set response and LICENSE_ACCEPTED variables at the beginning
             sed -i '1 a response="yes"\nLICENSE_ACCEPTED="yes"' installer.sh
+            # Set default GCM admin password to skip password prompts
+            sed -i '1 a GCM_ADMIN_PASSWORD="gcmAdmin@123"' installer.sh
           when: gcm_pods_check.stdout | int == 0
 
         - name: Run GCM installation
