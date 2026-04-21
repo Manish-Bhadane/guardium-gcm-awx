@@ -393,19 +393,26 @@
             KUBECONFIG: "{{ kubeconfig_path }}"
           failed_when: false
 
+        - name: Patch installer.sh to skip license prompt
+          shell: |
+            cd {{ gcm_install_dir }}/helm-charts
+            # Comment out the license prompt section (around line 118)
+            sed -i '118s/^/#/' installer.sh
+            # Or replace the read command with automatic yes
+            sed -i 's/read -p.*LICENSE_ACCEPTED.*/LICENSE_ACCEPTED="yes"/g' installer.sh
+          when: gcm_pods_check.stdout | int == 0
+
         - name: Run GCM installation
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
             export KUBECONFIG={{ kubeconfig_path }}
-            export ACCEPT_LICENSE=yes
-            echo "yes" | ./installer.sh install
+            ./installer.sh install < /dev/null
           register: gcm_install_result
           async: 1800
           poll: 30
           when: gcm_pods_check.stdout | int == 0
           environment:
             KUBECONFIG: "{{ kubeconfig_path }}"
-            ACCEPT_LICENSE: "yes"
 
         - name: Display GCM installation output
           debug:
