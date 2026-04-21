@@ -334,28 +334,34 @@
             backrefs: no
 
         - name: Update global-values.yaml - App Host
-          replace:
+          lineinfile:
             path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '(app:\s*\n\s*host:\s*).*'
-            replace: '\1{{ system_ip }}:{{ gcm_app_port }}'
+            regexp: '^\s*host:\s*.*$'
+            line: '    host: {{ system_ip }}:{{ gcm_app_port }}'
+            insertafter: '^app:'
 
         - name: Update global-values.yaml - OIDS Host
-          replace:
+          lineinfile:
             path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '(oidsServer:\s*\n\s*host:\s*).*'
-            replace: '\1{{ system_ip }}:{{ gcm_oids_port }}'
+            regexp: '^\s*host:\s*.*$'
+            line: '    host: {{ system_ip }}:{{ gcm_oids_port }}'
+            insertafter: '^oidsServer:'
 
         - name: Update global-values.yaml - Disable App Storage Class
-          replace:
+          lineinfile:
             path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '(persistence:\s*\n\s*app:\s*\n\s*storageClassEnabled:\s*)true'
-            replace: '\1false'
+            regexp: '^\s*storageClassEnabled:\s*true\s*$'
+            line: '      storageClassEnabled: false'
+            insertafter: '^\s*app:'
+            firstmatch: yes
 
         - name: Update global-values.yaml - Disable DBS Storage Class
-          replace:
+          lineinfile:
             path: "{{ gcm_install_dir }}/helm-charts/global-values.yaml"
-            regexp: '(persistence:\s*\n\s*dbs:\s*\n\s*storageClassEnabled:\s*)true'
-            replace: '\1false'
+            regexp: '^\s*storageClassEnabled:\s*true\s*$'
+            line: '      storageClassEnabled: false'
+            insertafter: '^\s*dbs:'
+            firstmatch: yes
 
         - name: Display modified global-values.yaml (first 100 lines)
           shell: head -100 {{ gcm_install_dir }}/helm-charts/global-values.yaml
