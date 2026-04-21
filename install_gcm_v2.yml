@@ -397,13 +397,15 @@
           shell: |
             cd {{ gcm_install_dir }}/helm-charts
             export KUBECONFIG={{ kubeconfig_path }}
-            ./installer.sh install
+            export ACCEPT_LICENSE=yes
+            echo "yes" | ./installer.sh install
           register: gcm_install_result
           async: 1800
           poll: 30
           when: gcm_pods_check.stdout | int == 0
           environment:
             KUBECONFIG: "{{ kubeconfig_path }}"
+            ACCEPT_LICENSE: "yes"
 
         - name: Display GCM installation output
           debug:
