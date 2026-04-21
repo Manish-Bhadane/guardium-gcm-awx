@@ -24,7 +24,8 @@
       shell: |
         sshpass -p '{{ server_password }}' ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
           {{ server_user }}@{{ server_ip }} "mkdir -p {{ target_dir }}"
-      no_log: true
+      environment:
+        SSHPASS: "{{ server_password }}"
 
     - name: Copy installation files from AWX server to target server
       shell: |
@@ -32,7 +33,8 @@
           {{ source_user }}@{{ source_host }}:{{ awx_files_dir }}/* /tmp/ && \
         sshpass -p '{{ server_password }}' scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
           /tmp/*.sh /tmp/*.tgz {{ server_user }}@{{ server_ip }}:{{ target_dir }}/
-      no_log: true
+      environment:
+        SSHPASS: "{{ server_password }}"
       register: scp_result
 
     - name: Display file copy status
